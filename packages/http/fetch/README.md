@@ -12,6 +12,41 @@ Read more about Kiota [here](https://github.com/microsoft/kiota/blob/main/README
 
 1. `npm i @microsoft/kiota-http-fetchlibrary`.
 
+## Body Inspection Handler
+
+The `BodyInspectionHandler` middleware allows you to inspect HTTP request and response bodies. This is particularly useful for debugging or capturing error payloads that are not mapped in the API schema.
+
+The handler is included in the default middleware pipeline configured by `KiotaClientFactory.create()`.
+
+### Configuration
+
+Body inspection is opt-in and controlled via `BodyInspectionOptions`. You can configure it globally on the handler or per-request by passing `BodyInspectionOptions` in the request options.
+
+```typescript
+import { BodyInspectionOptions } from "@microsoft/kiota-http-fetchlibrary";
+
+const bodyInspectionOptions = new BodyInspectionOptions({
+	inspectRequestBody: true,
+	inspectResponseBody: true,
+});
+
+// Pass per request using request configuration:
+await client.users.get({
+	options: [bodyInspectionOptions],
+});
+
+// Access the inspected body as an ArrayBuffer:
+const responseBuffer = bodyInspectionOptions.responseBody;
+```
+
+### Memory and Stream-Lifecycle Considerations
+
+- **Memory / Buffering**: Inspecting request and response bodies creates in-memory copies (`ArrayBuffer`). For large payloads or file transfers, buffering the entire body into memory increases heap usage. Only enable inspection when necessary.
+- **Stream Lifecycle**: In JavaScript and browser fetch implementations, `ReadableStream` instances are single-use and can only be consumed once.
+  - Web `ReadableStream` and Node.js readable request bodies are buffered once and replaced with replayable bytes before the request continues downstream. This consumes the original stream so a permitted retry can reuse the inspected request body. Retry eligibility is still controlled by `RetryHandler`; for example, it does not retry `application/octet-stream` POST, PUT, or PATCH requests.
+  - The captured request and response bodies are exposed as `ArrayBuffer` values. Callers that need another representation can construct it explicitly from those bytes.
+- **Concurrent requests**: Use a separate request-scoped `BodyInspectionOptions` instance for each request whose captured body you need to read. A handler's global options instance is shared across requests.
+
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
