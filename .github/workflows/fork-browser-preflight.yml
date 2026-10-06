@@ -1,0 +1,49 @@
+name: Fork MSAL browser preflight
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full tested SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: Verify SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run build
+      - name: Install browser tools
+        run: |
+          npm install --prefix /tmp/kiota-browser-tools --no-save @vitest/browser-playwright@5.0.1
+          node /tmp/kiota-browser-tools/node_modules/playwright/cli.js install --with-deps chromium
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/kiota-test-key.pem -out /tmp/kiota-test-cert.pem -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost
+      - name: Configure HTTPS browser tests
+        run: |
+          cat > packages/authentication/msal-browser/.fork-browser.config.mts <<'CONFIG'
+          import { defineConfig } from "vitest/config";
+          import { playwright } from "/tmp/kiota-browser-tools/node_modules/@vitest/browser-playwright/dist/index.js";
+          import { readFileSync } from "node:fs";
+          export default defineConfig({
+            server: { https: { key: readFileSync("/tmp/kiota-test-key.pem"), cert: readFileSync("/tmp/kiota-test-cert.pem") } },
+            test: { include: ["test/**/*.ts"], browser: { enabled: true, provider: playwright(), headless: true, instances: [{ browser: "chromium" }] } }
+          });
+          CONFIG
+      - name: Run actual Chromium tests
+        run: npm exec --workspace @microsoft/kiota-authentication-msal-browser -- vitest run --config .fork-browser.config.mts
